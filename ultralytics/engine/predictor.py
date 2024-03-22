@@ -195,6 +195,12 @@ class BasePredictor:
             vid_stride=self.args.vid_stride,
             buffer=self.args.stream_buffer,
         )
+        # wrap dataset in LoadDetections object if performing offline tracking
+        if self.args.offline_tracking:
+            from ultralytics.data.loaders import LoadDetections
+
+            self.dataset = LoadDetections(self.args.offline_tracking, self.dataset, self.model.names)
+
         self.source_type = self.dataset.source_type
         if not getattr(self, "stream", True) and (
             self.source_type.stream
@@ -237,22 +243,38 @@ class BasePredictor:
             self.run_callbacks("on_predict_start")
             for self.batch in self.dataset:
                 self.run_callbacks("on_predict_batch_start")
-                paths, im0s, s = self.batch
 
-                # Preprocess
-                with profilers[0]:
-                    im = self.preprocess(im0s)
+                # if offline_tracking then skip inference and get results returned by dataset
+                if self.args.offline_tracking:
+                    paths, im0s, s, results = self.batch
+                    # Preprocess
+                    with profilers[0]:
+                        im = self.preprocess(im0s)
 
-                # Inference
-                with profilers[1]:
-                    preds = self.inference(im, *args, **kwargs)
-                    if self.args.embed:
-                        yield from [preds] if isinstance(preds, torch.Tensor) else preds  # yield embedding tensors
-                        continue
+                    # set profiler inference time to zero
+                    profilers[1].dt = 0
 
-                # Postprocess
-                with profilers[2]:
-                    self.results = self.postprocess(preds, im, im0s)
+                    # set profiler postprocess time to zero
+                    profilers[2].dt = 0
+
+                    self.results = results
+                else:
+                    paths, im0s, s = self.batch
+                    # Preprocess
+                    with profilers[0]:
+                        im = self.preprocess(im0s)
+
+                    # Inference
+                    with profilers[1]:
+                        preds = self.inference(im, *args, **kwargs)
+                        if self.args.embed:
+                            yield from [preds] if isinstance(preds, torch.Tensor) else preds  # yield embedding tensors
+                            continue
+
+                    # Postprocess
+                    with profilers[2]:
+                        self.results = self.postprocess(preds, im, im0s)
+
                 self.run_callbacks("on_predict_postprocess_end")
 
                 # Visualize, save, write results
