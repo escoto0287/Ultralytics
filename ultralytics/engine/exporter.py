@@ -241,6 +241,7 @@ class Exporter:
         model = model.fuse()
         for m in model.modules():
             if isinstance(m, (Detect, RTDETRDecoder)):  # includes all Detect subclasses like Segment, Pose, OBB
+                self.args.end2end = m.end2end = m.__class__.__name__ == "v10Detect"
                 m.dynamic = self.args.dynamic
                 m.export = True
                 m.format = self.args.format
@@ -283,6 +284,7 @@ class Exporter:
             "batch": self.args.batch,
             "imgsz": self.imgsz,
             "names": model.names,
+            "end2end": self.args.end2end,
         }  # model metadata
         if model.task == "pose":
             self.metadata["kpt_shape"] = model.model[-1].kpt_shape
@@ -644,6 +646,7 @@ class Exporter:
                 op_config = cto.OpPalettizerConfig(mode="kmeans", nbits=bits, weight_threshold=512)
                 config = cto.OptimizationConfig(global_config=op_config)
                 ct_model = cto.palettize_weights(ct_model, config=config)
+        self.args.nms = self.args.nms and not self.args.end2end
         if self.args.nms and self.model.task == "detect":
             if mlmodel:
                 # coremltools<=6.2 NMS export requires Python<3.11
